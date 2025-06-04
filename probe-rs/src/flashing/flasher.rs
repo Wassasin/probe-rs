@@ -950,6 +950,7 @@ impl<O: Operation> ActiveFlasher<'_, '_, O> {
             }
         }
 
+        tracing::error!("marker flasher");
         // Resume target operation.
         self.core.run().map_err(FlashError::Run)?;
 

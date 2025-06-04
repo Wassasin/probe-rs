@@ -323,6 +323,7 @@ fn armv8a_core_start(
 pub(crate) fn cortex_m_core_start(core: &mut dyn ArmMemoryInterface) -> Result<(), ArmError> {
     use crate::architecture::arm::core::armv7m::Dhcsr;
 
+    tracing::error!("marker");
     let current_dhcsr = Dhcsr(core.read_word_32(Dhcsr::get_mmio_address())?);
 
     // Note: Manual addition for debugging, not part of the original DebugCoreStart function

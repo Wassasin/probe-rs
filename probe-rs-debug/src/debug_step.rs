@@ -340,6 +340,7 @@ fn run_to_address(
     let bp_to_use = breakpoints.iter().position(|bp| bp.is_none()).unwrap_or(0);
 
     if core.set_hw_breakpoint(bp_to_use, target_address).is_ok() {
+        tracing::error!("marker debug step");
         core.run()?;
         // It is possible that we are stepping over long running instructions.
         let status = core.wait_for_core_halted(Duration::from_millis(1000));

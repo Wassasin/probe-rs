@@ -188,6 +188,7 @@ impl CoreInterface for Armv8m<'_> {
     }
 
     fn halt(&mut self, timeout: Duration) -> Result<CoreInformation, Error> {
+        tracing::error!("marker halt");
         let mut value = Dhcsr(0);
         value.set_c_halt(true);
         value.set_c_debugen(true);
@@ -195,6 +196,8 @@ impl CoreInterface for Armv8m<'_> {
 
         self.memory
             .write_word_32(Dhcsr::get_mmio_address(), value.into())?;
+
+        tracing::error!("marker halt end");
 
         self.wait_for_core_halted(timeout)?;
 
@@ -213,6 +216,8 @@ impl CoreInterface for Armv8m<'_> {
         // Before we run, we always perform a single instruction step, to account for possible breakpoints that might get us stuck on the current instruction.
         self.step()?;
 
+        tracing::error!("marker run");
+
         let mut value = Dhcsr(0);
         value.set_c_halt(false);
         value.set_c_debugen(true);
@@ -221,6 +226,8 @@ impl CoreInterface for Armv8m<'_> {
         self.memory
             .write_word_32(Dhcsr::get_mmio_address(), value.into())?;
         self.memory.flush()?;
+
+        tracing::error!("marker run end");
 
         // We assume that the core is running now
         self.set_core_status(CoreStatus::Running);
@@ -296,6 +303,7 @@ impl CoreInterface for Armv8m<'_> {
             None
         };
 
+        tracing::error!("marker step");
         let mut value = Dhcsr(0);
         // Leave halted state.
         // Step one instruction.
@@ -308,6 +316,8 @@ impl CoreInterface for Armv8m<'_> {
         self.memory
             .write_word_32(Dhcsr::get_mmio_address(), value.into())?;
         self.memory.flush()?;
+
+        tracing::error!("marker step end");
 
         self.wait_for_core_halted(Duration::from_millis(100))?;
 
@@ -504,10 +514,14 @@ impl CoreInterface for Armv8m<'_> {
 
     #[tracing::instrument(skip(self))]
     fn enable_vector_catch(&mut self, condition: VectorCatchCondition) -> Result<(), Error> {
+        tracing::error!("marker enable vector catch");
+
         let mut dhcsr = Dhcsr(self.memory.read_word_32(Dhcsr::get_mmio_address())?);
         dhcsr.set_c_debugen(true);
         self.memory
             .write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
+
+        tracing::error!("marker enable vector catch end");
 
         let mut demcr = Demcr(self.memory.read_word_32(Demcr::get_mmio_address())?);
         let idpfr1 = IdPfr1(self.memory.read_word_32(IdPfr1::get_mmio_address())?);

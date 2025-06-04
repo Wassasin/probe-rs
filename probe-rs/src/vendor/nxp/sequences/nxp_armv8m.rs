@@ -289,6 +289,8 @@ fn wait_for_stop_after_reset(memory: &mut dyn ArmMemoryInterface) -> Result<(), 
     let dhcsr = Dhcsr(memory.read_word_32(Dhcsr::get_mmio_address())?);
 
     if !dhcsr.s_halt() {
+        tracing::error!("marker");
+
         let mut dhcsr = Dhcsr(0);
         dhcsr.enable_write();
         dhcsr.set_c_halt(true);
@@ -443,6 +445,7 @@ impl MIMXRT5xxS {
 
         // Halt the core in case it didn't stop at a breakpiont.
         tracing::trace!("halting MIMXRT5xxS Cortex-M33 core");
+        tracing::error!("marker");
         let mut dhcsr = Dhcsr(0);
         dhcsr.set_c_halt(true);
         dhcsr.set_c_debugen(true);
@@ -501,6 +504,7 @@ impl MIMXRT5xxS {
             interface.write_word_32(0x40004214, 0x130)?; // full drive and pullup
             interface.write_word_32(0x40102010, 1 << 5)?; // PIO4_5 is an output
             interface.write_word_32(0x40103214, 0)?; // PIO4_5 is driven low
+            interface.flush()?;
             thread::sleep(Duration::from_millis(100));
 
             interface.write_word_32(0x40102010, 0)?; // PIO4_5 is an input
@@ -515,16 +519,17 @@ impl MIMXRT5xxS {
             // generalize this so that the reset is configurable?
             //
             // See MIMX685-EVK schematics page 12 for details.
-            interface.write_word_32(0x40021044, 1 << 2)?; // enable HSGPIO2 clock
-            interface.write_word_32(0x40000074, 1 << 2)?; // take HSGPIO2 out of reset
             interface.write_word_32(0x40004130, 0x130)?; // full drive and pullup
+            interface.write_word_32(0x40021044, 1 << 2)?; // enable HSGPIO2 clock
+            interface.write_word_32(0x40020074, 1 << 2)?; // take HSGPIO2 out of reset
             interface.write_word_32(0x40102008, 1 << 12)?; // PIO2_12 is an output
             interface.write_word_32(0x40102288, 1 << 12)?; // PIO2_12 is driven low
-            thread::sleep(Duration::from_millis(100));
+            interface.flush()?;
+            thread::sleep(Duration::from_micros(100));
 
             interface.write_word_32(0x40102208, 1 << 12)?; // PIO2_12 is driven high
             interface.flush()?;
-            thread::sleep(Duration::from_millis(100));
+            // thread::sleep(Duration::from_millis(100));
         }
 
         Ok(())
@@ -588,16 +593,7 @@ impl ArmDebugSequence for MIMXRT5xxS {
         interface: &mut dyn DapAccess,
         dp: DpAddress,
     ) -> Result<(), ArmError> {
-        let mut abort = Abort::default();
-        abort.set_wderrclr(true);
-        abort.set_orunerrclr(true);
-        abort.set_stkcmpclr(true);
-        abort.set_stkerrclr(true);
-
         tracing::trace!("MIMXRT5xxS debug port start");
-
-        // Clear WDATAERR, STICKYORUN, STICKYCMP, and STICKYERR bits of CTRL/STAT Register by write to ABORT register
-        interface.write_dp_register(dp, abort)?;
 
         let dpidr: DPIDR = interface.read_dp_register(dp)?;
 
@@ -638,6 +634,12 @@ impl ArmDebugSequence for MIMXRT5xxS {
             ctrl.set_mask_lane(0xF);
             interface.write_dp_register(dp, ctrl)?;
 
+            let mut abort = Abort::default();
+            abort.set_wderrclr(true);
+            abort.set_orunerrclr(true);
+            abort.set_stkcmpclr(true);
+            abort.set_stkerrclr(true);
+
             // Clear WDATAERR, STICKYORUN, STICKYCMP, and STICKYERR bits of CTRL/STAT Register by write to ABORT register
             interface.write_dp_register(dp, abort)?;
 
@@ -659,6 +661,7 @@ impl ArmDebugSequence for MIMXRT5xxS {
         self.check_core_type(core_type)?;
 
         tracing::trace!("MIMXRT5xxS reset system");
+        tracing::error!("marker");
 
         // Halt the core
         let mut dhcsr = Dhcsr(0);
@@ -666,12 +669,13 @@ impl ArmDebugSequence for MIMXRT5xxS {
         dhcsr.set_c_debugen(true);
         dhcsr.enable_write();
         probe.write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
+        tracing::error!("Halting the core");
         probe.flush()?;
 
         // Clear VECTOR CATCH and set TRCENA
         let mut demcr: Demcr = probe.read_word_32(Demcr::get_mmio_address())?.into();
         demcr.set_trcena(true);
-        demcr.set_vc_corereset(false);
+        // demcr.set_vc_corereset(false);
         probe.write_word_32(Demcr::get_mmio_address(), demcr.into())?;
         probe.flush()?;
 

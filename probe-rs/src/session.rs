@@ -875,6 +875,7 @@ impl Session {
 
     /// Resume all cores
     pub fn resume_all_cores(&mut self) -> Result<(), Error> {
+        tracing::error!("marker resume all cores");
         // Resume cores
         for core_id in 0..self.cores.len() {
             match self.core(core_id) {

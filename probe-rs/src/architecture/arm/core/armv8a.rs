@@ -619,6 +619,7 @@ impl<'probe> Armv8a<'probe> {
 
         // restore halt status
         if !original_halt_status {
+            tracing::error!("marker original halt status neg");
             self.run()?;
         }
         result
@@ -1215,6 +1216,7 @@ impl CoreInterface for Armv8a<'_> {
         edecr.set_ss(true);
         self.memory.write_word_32(edecr_address, edecr.into())?;
 
+        tracing::error!("marker step run");
         // Resume
         self.run()?;
 
