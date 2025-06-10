@@ -920,6 +920,7 @@ pub trait ArmDebugSequence: Send + Sync + Debug {
             }
 
             if start.elapsed() >= Duration::from_secs(1) {
+                tracing::error!("Power down timeout");
                 return Err(ArmError::Timeout);
             }
         }

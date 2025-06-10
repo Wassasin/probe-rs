@@ -196,15 +196,15 @@ impl Cmd {
         let client_handle = rtt_client.handle();
 
         // Flash firmware
-        let boot_info = cli::flash(
-            &session,
-            &self.shared_options.path,
-            self.shared_options.chip_erase,
-            self.shared_options.format_options,
-            self.shared_options.download_options,
-            Some(&mut rtt_client),
-        )
-        .await?;
+        // let boot_info = cli::flash(
+        //     &session,
+        //     &self.shared_options.path,
+        //     self.shared_options.chip_erase,
+        //     self.shared_options.format_options,
+        //     self.shared_options.download_options,
+        //     Some(&mut rtt_client),
+        // )
+        // .await?;
 
         // Run firmware based on run mode
         if run_mode == RunMode::Test {

@@ -192,6 +192,8 @@ impl Session {
         permissions: Permissions,
         cores: Vec<CombinedCoreState>,
     ) -> Result<Self, Error> {
+        tracing::warn!("Attach ARM");
+
         let default_core = target.default_core();
 
         let default_memory_ap = default_core.memory_ap().ok_or_else(|| {
@@ -208,9 +210,10 @@ impl Session {
         };
 
         if AttachMethod::UnderReset == attach_method {
-            let _span = tracing::debug_span!("Asserting hardware reset").entered();
+            let _span = tracing::info_span!("Asserting hardware reset").entered();
 
             if let Some(dap_probe) = probe.try_as_dap_probe() {
+                tracing::info!("Sequence reset_hardware_reset");
                 sequence_handle.reset_hardware_assert(dap_probe)?;
             } else {
                 tracing::info!(
@@ -219,6 +222,32 @@ impl Session {
                 );
                 tracing::info!("Falling back to standard probe reset.");
                 probe.target_reset_assert()?;
+            }
+        } else {
+            if let Some(dap_probe) = probe.try_as_dap_probe() {
+                tracing::warn!("Performing rst deassert hack");
+                let n_reset = crate::architecture::arm::Pins(0x80).0 as u32;
+                let memory = dap_probe;
+
+                let can_read_pins = memory.swj_pins(0, n_reset, 0)? != 0xffff_ffff;
+
+                std::thread::sleep(Duration::from_millis(50));
+
+                let mut assert_n_reset = || memory.swj_pins(n_reset, n_reset, 0);
+
+                if can_read_pins {
+                    let start = std::time::Instant::now();
+                    let timeout_occured = || start.elapsed() > Duration::from_secs(1);
+
+                    while assert_n_reset()? & n_reset == 0 && !timeout_occured() {
+                        // Block until either condition passes
+                    }
+                } else {
+                    assert_n_reset()?;
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+
+                tracing::warn!("Rst deasserted");
             }
         }
 
@@ -247,6 +276,7 @@ impl Session {
             .try_into_arm_interface(sequence_handle.clone())
             .map_err(|(_, err)| err)?;
 
+        tracing::info!("Selecting debug port way");
         interface.select_debug_port(default_dp)?;
 
         let unlock_span = tracing::debug_span!("debug_device_unlock").entered();
@@ -256,6 +286,7 @@ impl Session {
             sequence_handle.debug_device_unlock(&mut *interface, &default_memory_ap, &permissions);
         drop(unlock_span);
 
+        tracing::info!("Half way");
         match unlock_res {
             Ok(()) => (),
             // In case this happens after unlock. Try to re-attach the probe once.
@@ -271,6 +302,8 @@ impl Session {
         }
 
         if attach_method == AttachMethod::UnderReset {
+            tracing::warn!("Connect under reset");
+
             {
                 for core in &cores {
                     core.arm_reset_catch_set(&mut *interface)?;
@@ -317,6 +350,8 @@ impl Session {
 
             Ok(session)
         } else {
+            tracing::warn!("Session constructed");
+
             Ok(Session {
                 target,
                 interfaces: ArchitectureInterface::Arm(interface),

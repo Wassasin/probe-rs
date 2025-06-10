@@ -209,8 +209,9 @@ impl ArmCommunicationInterface {
         let probe = self.probe.as_deref_mut().unwrap();
 
         if let Some(current_dp) = self.current_dp.take() {
-            let _stop_span = tracing::debug_span!("debug_port_stop").entered();
+            let _stop_span = tracing::info_span!("debug_port_stop").entered();
 
+            tracing::info!("Disconnect");
             // Stop the current DP, which may not be one of the known ones (i.e. RP2040 rescue DP).
             self.sequence.debug_port_stop(probe, current_dp).ok();
 

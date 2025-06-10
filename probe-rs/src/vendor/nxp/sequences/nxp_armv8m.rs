@@ -11,6 +11,7 @@ use crate::{
     architecture::arm::{
         ArmError, ArmProbeInterface, DapAccess, FullyQualifiedApAddress, Pins,
         ap::{AccessPortError, AccessPortType, ApRegister, GenericAp, IDR},
+        communication_interface::DapProbe,
         core::armv8m::{Aircr, Demcr, Dhcsr},
         dp::{Abort, Ctrl, DPIDR, DpAccess, DpAddress, DpRegister, SelectV1},
         memory::ArmMemoryInterface,
@@ -234,7 +235,7 @@ impl ArmDebugSequence for LPC55Sxx {
         }
 
         tracing::info!("Waiting after reset");
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(50));
 
         let start = Instant::now();
 
@@ -421,7 +422,7 @@ impl MIMXRT5xxS {
         &self,
         probe: &mut dyn ArmMemoryInterface,
     ) -> Result<(), ArmError> {
-        tracing::trace!("waiting for MIMXRT5xxS halt after reset");
+        tracing::info!("waiting for MIMXRT5xxS halt after reset");
 
         // Note: despite the name of this sequence in the CMSIS Pack, the
         // given implementation doesn't actually _wait_ for stop, and instead
@@ -431,7 +432,7 @@ impl MIMXRT5xxS {
         // to regain debug control.
 
         // Give bootloader time to do what it needs to do
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(200));
 
         let ap = probe.fully_qualified_address();
         let dp = ap.dp();
@@ -441,7 +442,7 @@ impl MIMXRT5xxS {
         {
             // Wait for either condition
         }
-        let enabled_mailbox = self.enable_debug_mailbox(probe.get_dap_access()?, dp, &ap)?;
+        self.enable_debug_mailbox(probe.get_dap_access()?, dp, &ap)?;
 
         // Halt the core in case it didn't stop at a breakpiont.
         tracing::trace!("halting MIMXRT5xxS Cortex-M33 core");
@@ -453,13 +454,11 @@ impl MIMXRT5xxS {
         probe.write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
         probe.flush()?;
 
-        if enabled_mailbox {
-            // We'll double-check now to make sure we're in a reasonable state.
-            if !self.csw_debug_ready(probe.get_dap_access()?, &ap)? {
-                tracing::warn!(
-                    "MIMXRT5xxS is still not ready to debug, even after using DebugMailbox to activate session"
-                );
-            }
+        // We'll double-check now to make sure we're in a reasonable state.
+        if !self.csw_debug_ready(probe.get_dap_access()?, &ap)? {
+            tracing::warn!(
+                "MIMXRT5xxS is still not ready to debug, even after using DebugMailbox to activate session"
+            );
         }
 
         // Clear watch point
@@ -487,6 +486,8 @@ impl MIMXRT5xxS {
                 probed
             );
         }
+
+        tracing::info!("Presuming the halt succeeded");
 
         Ok(())
     }
@@ -558,14 +559,19 @@ impl MIMXRT5xxS {
         mem_ap: &FullyQualifiedApAddress,
     ) -> Result<bool, ArmError> {
         // Check AHB-AP CSW DbgStatus to decide if need enable DebugMailbox
+        std::thread::sleep(Duration::from_millis(100));
+
         if self.csw_debug_ready(interface, mem_ap)? {
-            tracing::trace!("don't need to enable MIMXRT5xxS DebugMailbox");
+            tracing::warn!("don't need to enable MIMXRT5xxS DebugMailbox");
             return Ok(false);
         }
 
-        tracing::debug!("enabling MIMXRT5xxS DebugMailbox");
+        tracing::info!("enabling MIMXRT5xxS DebugMailbox");
 
         let ap_addr = &FullyQualifiedApAddress::v1_with_dp(dp, 2);
+
+        // interface.read_raw_ap_register(ap_addr, 0xFC)?;
+        // interface.read_raw_ap_register(ap_addr, 0x00)?;
 
         // CMSIS Pack implementation reads APIDR and DPIDR and passes each
         // to the "Message" function, but otherwise does nothing with those
@@ -573,11 +579,13 @@ impl MIMXRT5xxS {
 
         // Active DebugMailbox
         interface.write_raw_ap_register(ap_addr, 0x0, 0x00000021)?;
+        interface.flush()?;
         thread::sleep(Duration::from_millis(30));
         interface.read_raw_ap_register(ap_addr, 0x0)?;
 
         // Enter Debug Session
         interface.write_raw_ap_register(ap_addr, 0x4, 0x00000007)?;
+        interface.flush()?;
         thread::sleep(Duration::from_millis(30));
         interface.read_raw_ap_register(ap_addr, 0x0)?;
 
@@ -593,9 +601,7 @@ impl ArmDebugSequence for MIMXRT5xxS {
         interface: &mut dyn DapAccess,
         dp: DpAddress,
     ) -> Result<(), ArmError> {
-        tracing::trace!("MIMXRT5xxS debug port start");
-
-        let dpidr: DPIDR = interface.read_dp_register(dp)?;
+        tracing::info!("MIMXRT5xxS debug port start");
 
         // Switch to DP Register Bank 0
         interface.write_dp_register(dp, SelectV1(0))?;
@@ -604,12 +610,15 @@ impl ArmDebugSequence for MIMXRT5xxS {
         let mut ctrl: Ctrl = interface.read_dp_register(dp)?;
         let powered_down = !ctrl.csyspwrupack() || !ctrl.cdbgpwrupack();
         if powered_down {
-            tracing::trace!("MIMXRT5xxS is powered down, so requesting power-up");
+            tracing::info!("MIMXRT5xxS is powered down, so requesting power-up");
 
             // Request Debug/System Power-Up
             ctrl.set_csyspwrupreq(true);
             ctrl.set_cdbgpwrupreq(true);
             interface.write_dp_register(dp, ctrl)?;
+            interface.flush()?;
+
+            tracing::info!("MIMXRT5xxS powered up requested");
 
             // Wait for Power-Up Request to be acknowledged
             let start = Instant::now();
@@ -619,12 +628,17 @@ impl ArmDebugSequence for MIMXRT5xxS {
                     break;
                 }
                 if start.elapsed() >= Duration::from_secs(1) {
+                    tracing::error!("MIMXRT5xxS power up timeout");
                     return Err(ArmError::Timeout);
                 }
             }
+
+            tracing::info!("MIMXRT5xxS powered up");
         } else {
-            tracing::trace!("MIMXRT5xxS debug port is already powered");
+            tracing::info!("MIMXRT5xxS debug port is already powered");
         }
+
+        let dpidr: DPIDR = interface.read_dp_register(dp)?;
 
         // SWD Specific Part of sequence
         // TODO: Should we skip this if we're not using SWD? How?
@@ -647,7 +661,7 @@ impl ArmDebugSequence for MIMXRT5xxS {
             self.enable_debug_mailbox(interface, dp, &ap)?;
         }
 
-        tracing::trace!("MIMXRT5xxS debug port start was successful");
+        tracing::info!("MIMXRT5xxS debug port start was successful");
 
         Ok(())
     }
@@ -660,8 +674,7 @@ impl ArmDebugSequence for MIMXRT5xxS {
     ) -> Result<(), ArmError> {
         self.check_core_type(core_type)?;
 
-        tracing::trace!("MIMXRT5xxS reset system");
-        tracing::error!("marker");
+        tracing::error!("MIMXRT5xxS reset system");
 
         // Halt the core
         let mut dhcsr = Dhcsr(0);
@@ -669,8 +682,8 @@ impl ArmDebugSequence for MIMXRT5xxS {
         dhcsr.set_c_debugen(true);
         dhcsr.enable_write();
         probe.write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
-        tracing::error!("Halting the core");
         probe.flush()?;
+        tracing::error!("Halting the core");
 
         // Clear VECTOR CATCH and set TRCENA
         let mut demcr: Demcr = probe.read_word_32(Demcr::get_mmio_address())?.into();
@@ -698,10 +711,22 @@ impl ArmDebugSequence for MIMXRT5xxS {
             .write_word_32(Aircr::get_mmio_address(), aircr.into())
             .ok();
         probe.flush().ok();
+        thread::sleep(Duration::from_millis(50));
 
-        tracing::trace!("MIMXRT5xxS reset system was successful; waiting for halt after reset");
+        tracing::info!("MIMXRT5xxS reset system was successful; waiting for halt after reset");
 
         self.wait_for_stop_after_reset(probe)
+    }
+
+    #[doc(alias = "ResetHardwareAssert")]
+    fn reset_hardware_assert(&self, interface: &mut dyn DapProbe) -> Result<(), ArmError> {
+        tracing::info!("Reset hardware assert");
+        let mut n_reset = Pins(0);
+        n_reset.set_nreset(true);
+
+        let _ = interface.swj_pins(0, n_reset.0 as u32, 0)?;
+
+        Ok(())
     }
 
     fn reset_hardware_deassert(
@@ -709,20 +734,20 @@ impl ArmDebugSequence for MIMXRT5xxS {
         memory: &mut dyn ArmProbeInterface,
         _default_ap: &FullyQualifiedApAddress,
     ) -> Result<(), ArmError> {
-        tracing::trace!("MIMXRT5xxS reset hardware deassert");
-        let n_reset = Pins(0x80).0 as u32;
+        tracing::info!("MIMXRT5xxS reset hardware deassert");
+        let pins = Pins(0x80).0 as u32;
 
-        let can_read_pins = memory.swj_pins(0, n_reset, 0)? != 0xffff_ffff;
+        let can_read_pins = memory.swj_pins(0, pins, 0)? != 0xffff_ffff;
 
         thread::sleep(Duration::from_millis(50));
 
-        let mut assert_n_reset = || memory.swj_pins(n_reset, n_reset, 0);
+        let mut assert_n_reset = || memory.swj_pins(pins, pins, 0);
 
         if can_read_pins {
             let start = Instant::now();
             let timeout_occured = || start.elapsed() > Duration::from_secs(1);
 
-            while assert_n_reset()? & n_reset == 0 && !timeout_occured() {
+            while assert_n_reset()? & pins == 0 && !timeout_occured() {
                 // Block until either condition passes
             }
         } else {
