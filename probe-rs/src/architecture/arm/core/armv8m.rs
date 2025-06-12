@@ -106,7 +106,15 @@ impl CoreInterface for Armv8m<'_> {
     }
 
     fn status(&mut self) -> Result<crate::core::CoreStatus, Error> {
+        let dfsr = Dfsr(self.memory.read_word_32(Dfsr::get_mmio_address())?);
+        let demcr = Demcr(self.memory.read_word_32(Demcr::get_mmio_address())?);
         let dhcsr = Dhcsr(self.memory.read_word_32(Dhcsr::get_mmio_address())?);
+        // tracing::info!(
+        //     "DHCSR: {:#?}, DEMCR: {:#?}, DFSR: {:#?}",
+        //     dhcsr,
+        //     demcr,
+        //     dfsr
+        // );
 
         if dhcsr.s_lockup() {
             tracing::warn!(
@@ -128,8 +136,6 @@ impl CoreInterface for Armv8m<'_> {
 
             return Ok(CoreStatus::Sleeping);
         }
-
-        // TODO: Handle lockup
 
         if dhcsr.s_halt() {
             let dfsr = Dfsr(self.memory.read_word_32(Dfsr::get_mmio_address())?);
@@ -201,11 +207,15 @@ impl CoreInterface for Armv8m<'_> {
 
         self.wait_for_core_halted(timeout)?;
 
+        tracing::error!("waited for core halted");
+
         // Update core status
         let _ = self.status()?;
 
         // try to read the program counter
         let pc_value = self.read_core_reg(self.program_counter().into())?;
+
+        tracing::error!("pc @ {:?}", pc_value);
 
         // get pc
         Ok(CoreInformation {
@@ -319,7 +329,7 @@ impl CoreInterface for Armv8m<'_> {
 
         tracing::error!("marker step end");
 
-        self.wait_for_core_halted(Duration::from_millis(100))?;
+        self.wait_for_core_halted(Duration::from_millis(1000))?;
 
         // Try to read the new program counter.
         let mut pc_after_step = self.read_core_reg(self.program_counter().into())?;

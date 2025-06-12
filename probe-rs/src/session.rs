@@ -229,25 +229,28 @@ impl Session {
                 let n_reset = crate::architecture::arm::Pins(0x80).0 as u32;
                 let memory = dap_probe;
 
-                let can_read_pins = memory.swj_pins(0, n_reset, 0)? != 0xffff_ffff;
+                let pins = memory.swj_pins(0, 0, 0)?;
+                assert!(pins & 0x80 != 0);
 
-                std::thread::sleep(Duration::from_millis(50));
+                // let can_read_pins = memory.swj_pins(0, n_reset, 0)? != 0xffff_ffff;
 
-                let mut assert_n_reset = || memory.swj_pins(n_reset, n_reset, 0);
+                // std::thread::sleep(Duration::from_millis(50));
 
-                if can_read_pins {
-                    let start = std::time::Instant::now();
-                    let timeout_occured = || start.elapsed() > Duration::from_secs(1);
+                // let mut assert_n_reset = || memory.swj_pins(n_reset, n_reset, 0);
 
-                    while assert_n_reset()? & n_reset == 0 && !timeout_occured() {
-                        // Block until either condition passes
-                    }
-                } else {
-                    assert_n_reset()?;
-                    std::thread::sleep(Duration::from_millis(100));
-                }
+                // if can_read_pins {
+                //     let start = std::time::Instant::now();
+                //     let timeout_occured = || start.elapsed() > Duration::from_secs(1);
 
-                tracing::warn!("Rst deasserted");
+                //     while assert_n_reset()? & n_reset == 0 && !timeout_occured() {
+                //         // Block until either condition passes
+                //     }
+                // } else {
+                //     assert_n_reset()?;
+                //     std::thread::sleep(Duration::from_millis(100));
+                // }
+
+                // tracing::warn!("Rst deasserted");
             }
         }
 
@@ -276,7 +279,7 @@ impl Session {
             .try_into_arm_interface(sequence_handle.clone())
             .map_err(|(_, err)| err)?;
 
-        tracing::info!("Selecting debug port way");
+        tracing::info!("Selecting debug port");
         interface.select_debug_port(default_dp)?;
 
         let unlock_span = tracing::debug_span!("debug_device_unlock").entered();
@@ -549,7 +552,7 @@ impl Session {
             } else {
                 tracing::info!("Halting core {core}...");
                 resume_state.push(core);
-                c.halt(Duration::from_millis(100))?;
+                c.halt(Duration::from_millis(1000))?;
             }
         }
 

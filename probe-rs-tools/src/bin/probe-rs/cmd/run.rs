@@ -175,7 +175,8 @@ impl Cmd {
         // Detect run mode based on ELF file
         let run_mode = detect_run_mode(&self)?;
 
-        let session = cli::attach_probe(&client, self.shared_options.probe_options, false).await?;
+        let session =
+            cli::attach_probe(&client, self.shared_options.probe_options.clone(), false).await?;
 
         let mut rtt_client = rtt_client(
             &session,
@@ -206,49 +207,69 @@ impl Cmd {
         // )
         // .await?;
 
+        let core = session.core(0);
+        core.reset().await?;
+
+        // let session = cli::attach_probe(&client, self.shared_options.probe_options, false).await?;
+
+        cli::monitor(
+            &session,
+            MonitorMode::AttachToRunning,
+            &self.shared_options.path,
+            Some(rtt_client),
+            MonitorOptions {
+                catch_reset: !self.run_options.no_catch_reset,
+                catch_hardfault: !self.run_options.no_catch_hardfault,
+                rtt_client: Some(client_handle),
+            },
+            self.shared_options.always_print_stacktrace,
+            &mut target_output_files,
+        )
+        .await
+
         // Run firmware based on run mode
-        if run_mode == RunMode::Test {
-            cli::test(
-                &session,
-                boot_info,
-                Arguments {
-                    test_threads: Some(1), // Avoid parallel execution
-                    list: self.test_options.list,
-                    exact: self.test_options.exact,
-                    ignored: self.test_options.ignored,
-                    include_ignored: self.test_options.include_ignored,
-                    format: self.test_options.format,
-                    skip: self.test_options.skip_test.clone(),
-                    filter: if self.test_options.filter.is_empty() {
-                        None
-                    } else {
-                        //TODO: Fix libtest-mimic so that it allows multiple filters (same as std test runners)
-                        Some(self.test_options.filter.join(" "))
-                    },
-                    ..Arguments::default()
-                },
-                self.shared_options.always_print_stacktrace,
-                &self.shared_options.path,
-                Some(rtt_client),
-                &mut target_output_files,
-            )
-            .await
-        } else {
-            cli::monitor(
-                &session,
-                MonitorMode::Run(boot_info),
-                &self.shared_options.path,
-                Some(rtt_client),
-                MonitorOptions {
-                    catch_reset: !self.run_options.no_catch_reset,
-                    catch_hardfault: !self.run_options.no_catch_hardfault,
-                    rtt_client: Some(client_handle),
-                },
-                self.shared_options.always_print_stacktrace,
-                &mut target_output_files,
-            )
-            .await
-        }
+        // if run_mode == RunMode::Test {
+        //     cli::test(
+        //         &session,
+        //         boot_info,
+        //         Arguments {
+        //             test_threads: Some(1), // Avoid parallel execution
+        //             list: self.test_options.list,
+        //             exact: self.test_options.exact,
+        //             ignored: self.test_options.ignored,
+        //             include_ignored: self.test_options.include_ignored,
+        //             format: self.test_options.format,
+        //             skip: self.test_options.skip_test.clone(),
+        //             filter: if self.test_options.filter.is_empty() {
+        //                 None
+        //             } else {
+        //                 //TODO: Fix libtest-mimic so that it allows multiple filters (same as std test runners)
+        //                 Some(self.test_options.filter.join(" "))
+        //             },
+        //             ..Arguments::default()
+        //         },
+        //         self.shared_options.always_print_stacktrace,
+        //         &self.shared_options.path,
+        //         Some(rtt_client),
+        //         &mut target_output_files,
+        //     )
+        //     .await
+        // } else {
+        //     cli::monitor(
+        //         &session,
+        //         MonitorMode::Run(boot_info),
+        //         &self.shared_options.path,
+        //         Some(rtt_client),
+        //         MonitorOptions {
+        //             catch_reset: !self.run_options.no_catch_reset,
+        //             catch_hardfault: !self.run_options.no_catch_hardfault,
+        //             rtt_client: Some(client_handle),
+        //         },
+        //         self.shared_options.always_print_stacktrace,
+        //         &mut target_output_files,
+        //     )
+        //     .await
+        // }
     }
 }
 

@@ -94,6 +94,93 @@ impl LPC55Sxx {
     pub fn create() -> Arc<dyn ArmDebugSequence> {
         Arc::new(Self(()))
     }
+
+    fn wait_for_stop_after_reset(memory: &mut dyn ArmMemoryInterface) -> Result<(), ArmError> {
+        tracing::info!("Wait for stop after reset");
+
+        thread::sleep(Duration::from_millis(10));
+
+        if memory.generic_status()?.DeviceEn {
+            let dp = memory.fully_qualified_address().dp();
+            Self::enable_debug_mailbox(memory.get_dap_access()?, dp)?;
+        }
+
+        let start = Instant::now();
+
+        tracing::debug!("Polling for reset");
+
+        loop {
+            if let Ok(v) = memory.read_word_32(Dhcsr::get_mmio_address()) {
+                let dhcsr = Dhcsr(v);
+
+                // Wait until the S_RESET_ST bit is cleared on a read
+                if !dhcsr.s_reset_st() {
+                    break;
+                }
+            }
+
+            if start.elapsed() >= Duration::from_millis(500) {
+                return Err(ArmError::Timeout);
+            }
+        }
+
+        let dhcsr = Dhcsr(memory.read_word_32(Dhcsr::get_mmio_address())?);
+
+        if !dhcsr.s_halt() {
+            tracing::error!("marker");
+
+            let mut dhcsr = Dhcsr(0);
+            dhcsr.enable_write();
+            dhcsr.set_c_halt(true);
+            dhcsr.set_c_debugen(true);
+
+            tracing::debug!("Force halt until finding a proper catch.");
+            memory.write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
+        }
+
+        Ok(())
+    }
+
+    fn enable_debug_mailbox(interface: &mut dyn DapAccess, dp: DpAddress) -> Result<(), ArmError> {
+        tracing::info!("LPC55xx connect script start");
+
+        let ap = FullyQualifiedApAddress::v1_with_dp(dp, 2);
+
+        let status: IDR = interface
+            .read_raw_ap_register(GenericAp::new(ap.clone()).ap_address(), IDR::ADDRESS)?
+            .try_into()?;
+
+        tracing::info!("APIDR: {:?}", status);
+        tracing::info!("APIDR: 0x{:08X}", u32::from(status));
+
+        // ADIv5 specification section B4.3.3: "Connection and line reset sequence" states that
+        // in the reset state, reading DPIDR takes the target out of the reset state. Perform
+        // such a read here in order to ensure the core is no longer in reset.
+        let status: u32 = interface.read_raw_dp_register(dp, DPIDR::ADDRESS)?;
+
+        tracing::info!("DPIDR: 0x{:08X}", status);
+
+        // Active DebugMailbox
+        interface.write_raw_ap_register(&ap, 0x0, 0x0000_0021)?;
+        interface.flush()?;
+
+        // DAP_Delay(30000)
+        thread::sleep(Duration::from_millis(30));
+
+        let _ = interface.read_raw_ap_register(&ap, 0)?;
+
+        // Enter Debug session
+        interface.write_raw_ap_register(&ap, 0x4, 0x0000_0007)?;
+        interface.flush()?;
+
+        // DAP_Delay(30000)
+        thread::sleep(Duration::from_millis(30));
+
+        let _ = interface.read_raw_ap_register(&ap, 8)?;
+
+        tracing::info!("LPC55xx connect srcipt end");
+        Ok(())
+    }
 }
 
 impl ArmDebugSequence for LPC55Sxx {
@@ -250,99 +337,12 @@ impl ArmDebugSequence for LPC55Sxx {
             }
 
             if start.elapsed() >= Duration::from_millis(500) {
-                return wait_for_stop_after_reset(interface);
+                return Self::wait_for_stop_after_reset(interface);
             }
         }
 
         Ok(())
     }
-}
-
-fn wait_for_stop_after_reset(memory: &mut dyn ArmMemoryInterface) -> Result<(), ArmError> {
-    tracing::info!("Wait for stop after reset");
-
-    thread::sleep(Duration::from_millis(10));
-
-    if memory.generic_status()?.DeviceEn {
-        let dp = memory.fully_qualified_address().dp();
-        enable_debug_mailbox(memory.get_dap_access()?, dp)?;
-    }
-
-    let start = Instant::now();
-
-    tracing::debug!("Polling for reset");
-
-    loop {
-        if let Ok(v) = memory.read_word_32(Dhcsr::get_mmio_address()) {
-            let dhcsr = Dhcsr(v);
-
-            // Wait until the S_RESET_ST bit is cleared on a read
-            if !dhcsr.s_reset_st() {
-                break;
-            }
-        }
-
-        if start.elapsed() >= Duration::from_millis(500) {
-            return Err(ArmError::Timeout);
-        }
-    }
-
-    let dhcsr = Dhcsr(memory.read_word_32(Dhcsr::get_mmio_address())?);
-
-    if !dhcsr.s_halt() {
-        tracing::error!("marker");
-
-        let mut dhcsr = Dhcsr(0);
-        dhcsr.enable_write();
-        dhcsr.set_c_halt(true);
-        dhcsr.set_c_debugen(true);
-
-        tracing::debug!("Force halt until finding a proper catch.");
-        memory.write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
-    }
-
-    Ok(())
-}
-
-fn enable_debug_mailbox(interface: &mut dyn DapAccess, dp: DpAddress) -> Result<(), ArmError> {
-    tracing::info!("LPC55xx connect script start");
-
-    let ap = FullyQualifiedApAddress::v1_with_dp(dp, 2);
-
-    let status: IDR = interface
-        .read_raw_ap_register(GenericAp::new(ap.clone()).ap_address(), IDR::ADDRESS)?
-        .try_into()?;
-
-    tracing::info!("APIDR: {:?}", status);
-    tracing::info!("APIDR: 0x{:08X}", u32::from(status));
-
-    // ADIv5 specification section B4.3.3: "Connection and line reset sequence" states that
-    // in the reset state, reading DPIDR takes the target out of the reset state. Perform
-    // such a read here in order to ensure the core is no longer in reset.
-    let status: u32 = interface.read_raw_dp_register(dp, DPIDR::ADDRESS)?;
-
-    tracing::info!("DPIDR: 0x{:08X}", status);
-
-    // Active DebugMailbox
-    interface.write_raw_ap_register(&ap, 0x0, 0x0000_0021)?;
-    interface.flush()?;
-
-    // DAP_Delay(30000)
-    thread::sleep(Duration::from_millis(30));
-
-    let _ = interface.read_raw_ap_register(&ap, 0)?;
-
-    // Enter Debug session
-    interface.write_raw_ap_register(&ap, 0x4, 0x0000_0007)?;
-    interface.flush()?;
-
-    // DAP_Delay(30000)
-    thread::sleep(Duration::from_millis(30));
-
-    let _ = interface.read_raw_ap_register(&ap, 8)?;
-
-    tracing::info!("LPC55xx connect srcipt end");
-    Ok(())
 }
 
 /// Debug sequences for MIMXRT5xxS MCUs.
@@ -437,16 +437,17 @@ impl MIMXRT5xxS {
         let ap = probe.fully_qualified_address();
         let dp = ap.dp();
         let start = Instant::now();
-        while !self.csw_debug_ready(probe.get_dap_access()?, &ap)?
-            && start.elapsed() < Duration::from_millis(300)
-        {
+        while !self.csw_debug_ready(probe.get_dap_access()?, &ap)? {
+            if start.elapsed() > Duration::from_millis(300) {
+                tracing::error!("Debug port did not become ready");
+                return Err(ArmError::Timeout);
+            }
             // Wait for either condition
         }
         self.enable_debug_mailbox(probe.get_dap_access()?, dp, &ap)?;
 
         // Halt the core in case it didn't stop at a breakpiont.
         tracing::trace!("halting MIMXRT5xxS Cortex-M33 core");
-        tracing::error!("marker");
         let mut dhcsr = Dhcsr(0);
         dhcsr.set_c_halt(true);
         dhcsr.set_c_debugen(true);
@@ -486,6 +487,9 @@ impl MIMXRT5xxS {
                 probed
             );
         }
+
+        let pins = probe.get_arm_probe_interface()?.swj_pins(0, 0, 0)?;
+        assert!(pins & 0x80 != 0);
 
         tracing::info!("Presuming the halt succeeded");
 
@@ -559,8 +563,6 @@ impl MIMXRT5xxS {
         mem_ap: &FullyQualifiedApAddress,
     ) -> Result<bool, ArmError> {
         // Check AHB-AP CSW DbgStatus to decide if need enable DebugMailbox
-        std::thread::sleep(Duration::from_millis(100));
-
         if self.csw_debug_ready(interface, mem_ap)? {
             tracing::warn!("don't need to enable MIMXRT5xxS DebugMailbox");
             return Ok(false);
@@ -676,6 +678,9 @@ impl ArmDebugSequence for MIMXRT5xxS {
 
         tracing::error!("MIMXRT5xxS reset system");
 
+        let pins = probe.get_arm_probe_interface()?.swj_pins(0, 0, 0)?;
+        assert!(pins & 0x80 != 0);
+
         // Halt the core
         let mut dhcsr = Dhcsr(0);
         dhcsr.set_c_halt(true);
@@ -705,22 +710,25 @@ impl ArmDebugSequence for MIMXRT5xxS {
         let mut aircr = Aircr(0);
         aircr.set_sysresetreq(true);
         aircr.vectkey();
+
         // (we need to ignore errors here because the reset will make this
         // operation seem to have failed.)
         probe
             .write_word_32(Aircr::get_mmio_address(), aircr.into())
             .ok();
         probe.flush().ok();
-        thread::sleep(Duration::from_millis(50));
 
         tracing::info!("MIMXRT5xxS reset system was successful; waiting for halt after reset");
+
+        let pins = probe.get_arm_probe_interface()?.swj_pins(0, 0, 0)?;
+        assert!(pins & 0x80 != 0);
 
         self.wait_for_stop_after_reset(probe)
     }
 
     #[doc(alias = "ResetHardwareAssert")]
     fn reset_hardware_assert(&self, interface: &mut dyn DapProbe) -> Result<(), ArmError> {
-        tracing::info!("Reset hardware assert");
+        tracing::info!("MIMXRT5xxS reset hardware assert");
         let mut n_reset = Pins(0);
         n_reset.set_nreset(true);
 
@@ -737,7 +745,7 @@ impl ArmDebugSequence for MIMXRT5xxS {
         tracing::info!("MIMXRT5xxS reset hardware deassert");
         let pins = Pins(0x80).0 as u32;
 
-        let can_read_pins = memory.swj_pins(0, pins, 0)? != 0xffff_ffff;
+        let can_read_pins = memory.swj_pins(0, 0, 0)? != 0xffff_ffff;
 
         thread::sleep(Duration::from_millis(50));
 
@@ -754,6 +762,9 @@ impl ArmDebugSequence for MIMXRT5xxS {
             assert_n_reset()?;
             thread::sleep(Duration::from_millis(100));
         }
+
+        let pins: u32 = memory.swj_pins(0, 0, 0)?;
+        assert!(pins & 0x80 != 0);
 
         Ok(())
     }

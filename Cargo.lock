@@ -1623,7 +1623,18 @@ checksum = "daa0a64d21a7eb230583b4c5f4e23b7e4e57974f96620f42a7e75e08ae66d745"
 dependencies = [
  "log",
  "plain",
- "scroll",
+ "scroll 0.12.0",
+]
+
+[[package]]
+name = "goblin"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e961b33649994dcf69303af6b3a332c1228549e604d455d61ec5d2ab5e68d3a"
+dependencies = [
+ "log",
+ "plain",
+ "scroll 0.13.0",
 ]
 
 [[package]]
@@ -3001,7 +3012,7 @@ dependencies = [
  "pretty_assertions",
  "probe-rs-target",
  "rmp-serde",
- "scroll",
+ "scroll 0.12.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3057,6 +3068,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "probe-rs-test"
+version = "0.29.0"
+dependencies = [
+ "anyhow",
+ "async-io",
+ "goblin 0.10.0",
+ "probe-rs",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "probe-rs-tools"
 version = "0.29.0"
 dependencies = [
@@ -3084,7 +3107,7 @@ dependencies = [
  "futures-util",
  "gdbstub",
  "git-version",
- "goblin",
+ "goblin 0.9.3",
  "ihex",
  "indicatif",
  "insta",
@@ -3109,7 +3132,7 @@ dependencies = [
  "rustyline",
  "sanitize-filename",
  "schemafy",
- "scroll",
+ "scroll 0.12.0",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -3700,7 +3723,16 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ab8598aa408498679922eff7fa985c25d58a90771bd6be794434c5277eab1a6"
 dependencies = [
- "scroll_derive",
+ "scroll_derive 0.12.0",
+]
+
+[[package]]
+name = "scroll"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1257cd4248b4132760d6524d6dda4e053bc648c9070b960929bf50cfb1e7add"
+dependencies = [
+ "scroll_derive 0.13.0",
 ]
 
 [[package]]
@@ -3708,6 +3740,17 @@ name = "scroll_derive"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f81c2fde025af7e69b1d1420531c8a8811ca898919db177141a85313b1cb932"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
+
+[[package]]
+name = "scroll_derive"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22fc4f90c27b57691bbaf11d8ecc7cfbfe98a4da6dbe60226115d322aa80c06e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4155,7 +4198,7 @@ dependencies = [
  "cmsis-pack",
  "colored 3.0.0",
  "futures",
- "goblin",
+ "goblin 0.9.3",
  "insta",
  "jep106",
  "log",
@@ -4163,7 +4206,7 @@ dependencies = [
  "probe-rs",
  "probe-rs-target",
  "reqwest",
- "scroll",
+ "scroll 0.12.0",
  "serde_yaml",
  "tempfile",
  "tokio",
