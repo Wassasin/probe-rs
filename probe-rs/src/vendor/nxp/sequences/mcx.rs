@@ -196,9 +196,26 @@ impl MCX {
             }
             thread::sleep(Duration::from_millis(10));
         }
-        tracing::info!("DEBUG_SESSION_REQ: success");
 
         interface.flush()?;
+
+        // Await for the bootloader to be started, which temporarily disables the AP.
+        // If we would not wait here, the next check would note that the AP is enabled and shortly after it would no longer be.
+        thread::sleep(Duration::from_millis(30));
+
+        // Await until bootloader actually grants access to core after opening debug mailbox
+        let start = Instant::now();
+        while !self.is_ap_enabled(interface, &ap)? && start.elapsed() < Duration::from_millis(500) {
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        if self.is_ap_enabled(interface, &ap)? {
+            tracing::info!("DEBUG_SESSION_REQ: success");
+        } else {
+            tracing::warn!(
+                "DEBUG_SESSION_REQ: AP did not re-activate after requesting a debug mailbox"
+            );
+        }
 
         Ok(true)
     }
@@ -265,19 +282,6 @@ impl MCX {
         // Try to enable debug mailbox if AP is still not enabled
         if !self.is_ap_enabled(interface.get_arm_debug_interface()?, &ap)? {
             self.enable_debug_mailbox(interface.get_arm_debug_interface()?, dp)?;
-        }
-
-        let start = Instant::now();
-        let timeout = if self.is_variant(Self::VARIANT_N0) {
-            Duration::from_millis(500)
-        } else {
-            Duration::from_millis(300)
-        };
-
-        while !self.is_ap_enabled(interface.get_arm_debug_interface()?, &ap)?
-            && start.elapsed() < timeout
-        {
-            thread::sleep(Duration::from_millis(10));
         }
 
         // Halt the core in case it didn't stop at a breakpoint
