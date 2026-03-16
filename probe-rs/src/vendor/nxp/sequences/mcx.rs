@@ -309,6 +309,34 @@ impl MCX {
         interface.write_word_32(0xE000_EDF4, 0x0001_001C)?;
         interface.flush()?;
 
+        let start = Instant::now();
+        loop {
+            if let Ok(v) = interface.read_word_32(Dhcsr::get_mmio_address()) {
+                let dhcsr = Dhcsr(v);
+
+                // Wait until the S_RESET_ST bit is cleared on a read
+                if !dhcsr.s_reset_st() {
+                    break;
+                }
+            }
+
+            if start.elapsed() >= Duration::from_millis(500) {
+                return Err(ArmError::Timeout);
+            }
+        }
+
+        let dhcsr = Dhcsr(interface.read_word_32(Dhcsr::get_mmio_address())?);
+
+        if !dhcsr.s_halt() {
+            let mut dhcsr = Dhcsr(0);
+            dhcsr.enable_write();
+            dhcsr.set_c_halt(true);
+            dhcsr.set_c_debugen(true);
+
+            tracing::debug!("Force halt until finding a proper catch.");
+            interface.write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
+        }
+
         Ok(())
     }
 }
